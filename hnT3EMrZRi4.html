@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta name="robots" content="noindex">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 做 Chrome 外掛：智慧總結</title>
+<style>
+:root{
+  --bg:#f6f8fc; --card:#fff; --ink:#14213d; --muted:#5b6b86; --line:#dfe6f1;
+  --blue:#1f4e9c; --blue-soft:#e8effb; --orange:#e8590c; --orange-soft:#fff0e6;
+  --green:#2b8a5b; --green-soft:#e6f6ee; --red:#c0392b; --red-soft:#fdecea;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1626; --card:#16213a; --ink:#e8eefb; --muted:#9bacc8; --line:#263454;
+    --blue:#7fb0ff; --blue-soft:#1b2c4e; --orange:#ff9a52; --orange-soft:#3a2415;
+    --green:#5fd09b; --green-soft:#16332a; --red:#ff8a7a; --red-soft:#3a1d1a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1626; --card:#16213a; --ink:#e8eefb; --muted:#9bacc8; --line:#263454;
+  --blue:#7fb0ff; --blue-soft:#1b2c4e; --orange:#ff9a52; --orange-soft:#3a2415;
+  --green:#5fd09b; --green-soft:#16332a; --red:#ff8a7a; --red-soft:#3a1d1a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 -apple-system,"Segoe UI","Noto Sans TC","Microsoft JhengHei",sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:1.7rem;line-height:1.35;margin:.2em 0 .4em}
+h2{font-size:1.2rem;margin:2.2em 0 .8em;display:flex;align-items:center;gap:.5em}
+h2::before{content:"";width:6px;height:1.1em;border-radius:3px;background:var(--orange)}
+.src{color:var(--muted);font-size:.9rem}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.chip{background:var(--blue-soft);color:var(--blue);padding:4px 12px;border-radius:999px;font-size:.88rem;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+.lead{border-left:6px solid var(--blue);font-size:1.02rem}
+
+/* pain vs fix */
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.vs .bad{background:var(--red-soft);border-color:transparent}
+.vs .good{background:var(--green-soft);border-color:transparent}
+.vs h3{margin:0 0 .4em;font-size:1rem}
+.bad h3{color:var(--red)} .good h3{color:var(--green)}
+.vs ul{margin:0;padding-left:1.2em}
+
+/* flow */
+.flow{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding-bottom:6px}
+.step{flex:1 0 128px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center;position:relative}
+.step b{display:block;font-size:.95rem}
+.step span{font-size:.8rem;color:var(--muted)}
+.step .tag{display:inline-block;margin-bottom:6px;font-size:.72rem;font-weight:700;padding:1px 8px;border-radius:999px;background:var(--orange-soft);color:var(--orange)}
+.step.cc .tag{background:var(--blue-soft);color:var(--blue)}
+.arrow{flex:0 0 22px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+
+/* features */
+.feat{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.feat ul{list-style:none;margin:0;padding:0}
+.feat li{padding:6px 0;border-bottom:1px dashed var(--line)}
+.feat li:last-child{border:0}
+.ok::before{content:"✔ ";color:var(--green);font-weight:700}
+.no::before{content:"✘ ";color:var(--red);font-weight:700}
+.later::before{content:"⏳ "}
+
+/* options */
+.opts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.opt{border:2px solid var(--line);border-radius:12px;padding:12px;background:var(--card)}
+.opt.pick{border-color:var(--orange);background:var(--orange-soft)}
+.opt b{display:block}
+.opt small{color:var(--muted)}
+.pickmark{font-size:.75rem;font-weight:700;color:var(--orange)}
+
+/* three factors */
+.tri{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.tri .card{text-align:center}
+.num{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--blue);color:var(--card);font-weight:800;margin-bottom:6px}
+
+/* timeline */
+.bar{display:flex;height:46px;border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.seg{border:0;padding:0;cursor:pointer;color:#fff;font-size:.7rem;font-weight:700;min-width:20px;overflow:hidden;border-right:1px solid rgba(255,255,255,.55);background:var(--blue)}
+.seg:nth-child(3n+2){background:#3b73c9}
+.seg:nth-child(3n){background:#5b8fdc}
+.seg.on{background:var(--orange)!important}
+.ticks{display:flex;justify-content:space-between;color:var(--muted);font-size:.78rem;margin:4px 2px 12px}
+#detail{min-height:96px}
+#detail .t{color:var(--orange);font-weight:800;font-size:.9rem}
+#detail h3{margin:.1em 0 .3em;font-size:1.05rem}
+#detail p{margin:0}
+.chlist{display:grid;gap:8px;margin-top:14px}
+.chlist .row{display:grid;grid-template-columns:1fr auto;gap:8px}
+.chlist button{all:unset;cursor:pointer;display:grid;grid-template-columns:118px 1fr;gap:10px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.chlist button:hover,.chlist .row.on button{border-color:var(--orange)}
+.chlist .go{display:grid;place-items:center;width:42px;border-radius:10px;background:var(--orange-soft);color:var(--orange);text-decoration:none;font-weight:700}
+#detail{scroll-margin-top:70px}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.acts button{font:inherit;font-size:.85rem;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+.acts button:disabled{opacity:.4;cursor:default}
+.acts .go{margin-left:auto;font-size:.88rem;font-weight:700;padding:6px 14px;border-radius:8px;background:var(--orange);color:#fff;text-decoration:none}
+
+/* embedded player */
+.player{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000;margin-bottom:14px;scroll-margin-top:60px}
+.player iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.player.off{aspect-ratio:auto;background:var(--orange-soft)}
+.player.off p{margin:0;padding:12px 16px;color:var(--ink);font-size:.9rem}
+
+/* watch-along: player column stays put while the chapter list scrolls */
+.watch{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:18px;align-items:start}
+.watch-main{position:sticky;top:60px;display:grid;gap:0}
+.watch .chlist{margin-top:0}
+.watch .chlist button{grid-template-columns:1fr;gap:2px}
+.player.off{position:static}
+
+/* sticky nav + quick mode */
+.nav{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--line)}
+.nav .in{max-width:980px;margin:0 auto;padding:8px 16px;display:flex;align-items:center;gap:12px}
+.mode{display:flex;flex:0 0 auto;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.mode button{font:inherit;font-size:.82rem;font-weight:700;border:0;padding:5px 12px;background:var(--card);color:var(--muted);cursor:pointer}
+.mode button.on{background:var(--blue);color:var(--card)}
+#navlinks{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none}
+#navlinks a{flex:0 0 auto;font-size:.84rem;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:999px}
+#navlinks a:hover{background:var(--blue-soft);color:var(--blue)}
+section{scroll-margin-top:56px}
+.quick section.full,.quick #navlinks a.full{display:none}
+.quickhint{display:none;color:var(--muted);font-size:.88rem;margin-top:24px;text-align:center}
+.quick .quickhint{display:block}
+.chlist .tm{color:var(--orange);font-weight:700;font-size:.85rem;font-variant-numeric:tabular-nums}
+
+/* quotes + insights */
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.quote{background:var(--blue-soft);border-radius:12px;padding:16px;font-size:1.02rem;font-weight:600;color:var(--ink)}
+.quote small{display:block;margin-top:6px;color:var(--muted);font-weight:500}
+.ins{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.ins .card{border-top:4px solid var(--orange)}
+.ins h3{margin:0 0 .3em;font-size:1rem}
+.ins p{margin:0;color:var(--muted);font-size:.93rem}
+
+@media (max-width:720px){
+  .watch{grid-template-columns:1fr}
+  .watch-main{display:contents}
+  .player{position:sticky;top:52px;z-index:5;margin-bottom:10px}
+
+  .vs,.feat,.opts,.tri,.quotes,.ins{grid-template-columns:1fr}
+  .flow{flex-direction:column}.arrow{transform:rotate(90deg);flex-basis:16px}
+  .chlist button{grid-template-columns:1fr}
+  .seg{font-size:.62rem}
+  .acts .go{margin-left:0;width:100%;text-align:center}
+}
+</style>
+</head>
+<body>
+<nav class="nav"><div class="in">
+  <div class="mode" role="group" aria-label="閱讀模式">
+    <button id="mQuick" onclick="setMode(true)">30 秒速覽</button>
+    <button id="mFull" onclick="setMode(false)">完整版</button>
+  </div>
+  <div id="navlinks"></div>
+</div></nav>
+<div class="wrap">
+
+<div class="src">柚智夫妻 X 雷蒙三十 · <a href="https://www.youtube.com/watch?v=hnT3EMrZRi4" style="color:var(--blue)">YouTube 原影片</a></div>
+<h1>不會寫程式也能用 AI 做出 Chrome 外掛</h1>
+<div class="chips">
+  <span class="chip">⏱ 約 21 分鐘</span>
+  <span class="chip">🎓 知識分享 / 實作教學</span>
+  <span class="chip">🛠 Claude Code + Codex</span>
+  <span class="chip">🧩 Brainstorm Skill</span>
+</div>
+
+<div class="card lead">
+  講者示範在不寫程式的前提下，用 Claude Code 搭配自製的 Brainstorm Skill 先把需求逐題問清楚並產出企劃書，再交給 Codex 實作，從零做出讓 GitHub 文件可自訂字型、字級、行高與配色的 Chrome 外掛。最後歸納出 AI 產出品質取決於 <b>Skill、模型強度、執行時間</b> 三件事。
+</div>
+
+<h2 data-nav="邊看邊讀">邊看影片邊讀章節（點 ▶ 跳到該段播放，← → 鍵切換段落）</h2>
+<div class="watch">
+  <div class="watch-main">
+    <div class="player" id="player"><div id="yt"></div></div>
+    <div class="bar" id="bar"></div>
+    <div class="ticks"><span>00:00</span><span>05:00</span><span>10:00</span><span>15:00</span><span>21:10</span></div>
+    <div class="card" id="detail"></div>
+  </div>
+  <div class="chlist" id="chlist"></div>
+</div>
+
+<h2 data-nav="痛點">痛點：直接叫 AI 寫，常常白做</h2>
+<div class="vs">
+  <div class="card bad">
+    <h3>✘ 直接叫 AI 寫程式</h3>
+    <ul>
+      <li>丟一句需求，AI 只能猜</li>
+      <li>給 15 到 20 分鐘，成果常常不能用</li>
+      <li>每版都打掉重來，重做三、四次</li>
+      <li>使用者先失去耐心，總耗時更長</li>
+    </ul>
+  </div>
+  <div class="card good">
+    <h3>✔ 先問清楚、寫企劃書再動手</h3>
+    <ul>
+      <li>AI 一題一題提問，補齊受眾、視覺、功能、驗收</li>
+      <li>先看視覺化企劃書，確認再施工</li>
+      <li>等於設計公司先出渲染圖，省工又省 Token</li>
+      <li>一次到位的機率大增</li>
+    </ul>
+  </div>
+</div>
+
+<h2 data-nav="流程">整體流程與工具分工</h2>
+<div class="flow">
+  <div class="step cc"><span class="tag">Claude Code</span><b>逐題討論需求</b><span>Brainstorm Skill</span></div><div class="arrow">➜</div>
+  <div class="step cc"><span class="tag">Claude Code</span><b>視覺化企劃書</b><span>換膚三方案</span></div><div class="arrow">➜</div>
+  <div class="step"><span class="tag">Codex</span><b>產生外掛程式碼</b><span>推理程度 High 即可</span></div><div class="arrow">➜</div>
+  <div class="step"><span class="tag">你</span><b>本機載入測試</b><span>開發人員模式</span></div><div class="arrow">➜</div>
+  <div class="step"><span class="tag">Codex</span><b>兩輪修改</b><span>介面與互動</span></div><div class="arrow">➜</div>
+  <div class="step"><span class="tag">AI</span><b>截圖 + 上架素材</b><span>Chrome Web Store</span></div>
+</div>
+
+<h2 data-nav="取捨">需求取捨：做什麼，不做什麼</h2>
+<div class="feat">
+  <div class="card">
+    <b>要做</b>
+    <ul>
+      <li class="ok">字型、字級、行高、字距可調</li>
+      <li class="ok">閱讀寬度控制</li>
+      <li class="ok">配色主題（米黃 A、米黃 B、暖褐深色）</li>
+      <li class="later">浮動目錄（第二輪先延後）</li>
+    </ul>
+  </div>
+  <div class="card">
+    <b>不做</b>
+    <ul>
+      <li class="no">中英文自動加空格：怕影響排版，標點要維持全形寬度</li>
+      <li class="no">快捷鍵切換主題：判斷一般人用不到</li>
+    </ul>
+  </div>
+</div>
+
+<h2 data-nav="方案">換膚方案：講者全都要</h2>
+<div class="opts">
+  <div class="opt pick"><span class="pickmark">✔ 選了 A</span><b>A 全站換膚</b><small>整頁一起換，視覺一致</small></div>
+  <div class="opt pick"><span class="pickmark">✔ 選了 B</span><b>B 只換正文</b><small>沉浸感會斷</small></div>
+  <div class="opt pick"><span class="pickmark">✔ 選了 D</span><b>D 分層換膚</b><small>工作量比 A 多五成</small></div>
+</div>
+<p class="src">以往找開發團隊不能這麼貪心，現在 AI 可以一次全做。</p>
+
+<h2 data-nav="實測">第一版實測 → 第二輪修改</h2>
+<div class="vs">
+  <div class="card bad">
+    <h3>第一版的問題</h3>
+    <ul>
+      <li>米黃 A、B 主題點了沒反應</li>
+      <li>深色主題下 GitHub 原生按鈕沒跟著變色</li>
+      <li>浮出面板樣式難看，點一下就消失</li>
+    </ul>
+  </div>
+  <div class="card good">
+    <h3>第二輪要求</h3>
+    <ul>
+      <li>主題改成點選預覽圖，取代下拉選單</li>
+      <li>字級等項目改用滑桿加圖示</li>
+      <li>面板只在點右下圓形按鈕時才收起</li>
+      <li>米黃 A 換成品牌橘色與暖色底</li>
+    </ul>
+  </div>
+</div>
+
+<h2 data-nav="三要素" data-quick>AI 產出品質的三個要素</h2>
+<div class="tri">
+  <div class="card"><div class="num">1</div><br><b>專屬 Skill 與記憶</b><br><small>工作怎麼做才算好，由你決定並寫給 AI</small></div>
+  <div class="card"><div class="num">2</div><br><b>夠強的模型</b><br><small>較高推理程度才能做複雜任務</small></div>
+  <div class="card"><div class="num">3</div><br><b>足夠的時間</b><br><small>讓 AI 循環驗證、持續進化</small></div>
+</div>
+
+
+<h2 data-nav="金句" data-quick>金句精選</h2>
+<div class="quotes">
+  <div class="quote">AI 不知道你要什麼，就只能用猜的<small>00:11</small></div>
+  <div class="quote">先讓它一題一題問清楚<small>00:14</small></div>
+  <div class="quote">它其實自己會派它的小分身<small>19:06</small></div>
+</div>
+
+<h2 data-nav="洞察" data-quick>關鍵洞察</h2>
+<div class="ins">
+  <div class="card"><h3>計畫階段是在買「一次到位」</h3><p>寫計畫花 30 多分鐘，換掉的是三、四輪打掉重來；驗收標準模糊時，先付溝通成本幾乎總比付返工成本便宜。</p></div>
+  <div class="card"><h3>讓 AI 提問，比自己寫規格可行</h3><p>非技術使用者不知道該交代什麼，Brainstorm 把「該問什麼」編碼進 Skill，使用者只需回答，門檻就在這裡降低。</p></div>
+  <div class="card"><h3>取捨本身就是需求</h3><p>好的需求要說出不做什麼、先做什麼，才能控制範圍與品質；片中排除與延後的項目就是例子。</p></div>
+  <div class="card"><h3>角色不如 Skill</h3><p>與其設定行銷、財務等 AI 角色，不如把各類工作的做法寫成 Skill 讓 AI 自行調度，這也是三要素中唯一能由自己累積的一項。</p></div>
+</div>
+
+<p class="quickhint">這是 30 秒速覽。流程、取捨、方案與章節時間軸在 <a href="#" onclick="setMode(false);return false" style="color:var(--blue)">完整版</a>。</p>
+</div>
+
+<script>
+// 起訖秒數取自逐字稿時間戳；總長 1270 秒
+const CH=[
+[0,28,"開場：為什麼這次先問清楚再動手","過去讓 AI 直接做東西常得到不能用的成果；這次改成先讓 AI 一題一題問清楚、寫成計畫書再動手。"],
+[28,108,"Brainstorm Skill 與外掛動機","課程文件放在 GitHub，網頁只能放大字、不能調行距或換字型，於是做外掛，並以讀墨的閱讀設定為參考。"],
+[108,158,"工具分工與初始需求","Claude Code 寫計畫、Codex 執行；需求是閱讀 GitHub 文件時能改配色與字型，並提供品牌 CIS 字型。"],
+[158,299,"逐題討論與功能取捨","選半技術模式後 AI 逐題提問；加入閱讀寬度與字級、行高、字距，排除自動加空格與快捷鍵切換主題。"],
+[299,346,"先企劃後開發的理由","直接寫完可能 30 分鐘白寫；以設計公司先給渲染圖為比喻，先做企劃與 Demo 更省工省 Token。"],
+[346,447,"Brainstorm Skill 解決什麼問題","只給一句需求時 AI 會腦補；此 Skill 整合 Superpowers 與 Matt Pocock 的企劃 Skill，描述需求加一張參考圖即可。"],
+[447,607,"視覺化企劃書與換膚方案","企劃書含主題配色候選；換膚三案，講者選 A、B、D 全做。"],
+[607,710,"計畫時間的價值與推理設定","重做三、四版更耗時；以 5 萬預算找裝潢公司比喻。小專案推理程度設 High 即可。"],
+[710,821,"本機安裝外掛","開啟開發人員模式，載入未封裝項目，選取 github-reader 資料夾完成安裝。"],
+[821,862,"第一版實測","字型、字級、行高、字距、閱讀寬度都能調，但米黃主題失敗、外觀不佳。"],
+[862,1005,"提出第二輪修改","修主題無反應、深色主題按鈕、改滑桿與預覽圖選主題、面板不要自動消失、圓形按鈕換字，浮動目錄延後。"],
+[1005,1066,"第二版成果","喜歡米黃 B 與暖褐深色，要求米黃 A 改成品牌橘色與暖色底，準備上傳。"],
+[1066,1131,"自動截圖與上架素材","自動截圖 Skill 只截更新重點並套手機 Mockup，省下約 5 分鐘手工；AI 自行查 Chrome Web Store 發布需求。"],
+[1131,1223,"子代理機制與品質三要素","AI 會開子代理分工；品質不佳的三個原因：沒有專屬 Skill 與記憶、模型不夠強、沒給足夠時間。"],
+[1223,1270,"重點回顧","寫計畫用高階模型、多花時間看方案反而省最後的時間；視覺類專案很主觀，越挑剔修改越久。"]
+];
+// YouTube 來源才填；Spotify 沒有時間參數連結，留空就不顯示跳轉
+const VIDEO="https://www.youtube.com/watch?v=hnT3EMrZRi4";
+const jump=a=>VIDEO?`${VIDEO}${VIDEO.includes("?")?"&":"?"}t=${a}s`:"";
+const T=s=>String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
+const bar=document.getElementById("bar"),list=document.getElementById("chlist"),det=document.getElementById("detail");
+const segs=[],rows=[];
+let cur=0;
+function show(i,scroll){
+  if(i<0||i>=CH.length)return;
+  cur=i;
+  const [a,b,t,d]=CH[i];
+  det.innerHTML=`<div class="t">第 ${i+1} / ${CH.length} 段 · ${T(a)} – ${T(b)}</div><h3>${t}</h3><p>${d}</p>
+    <div class="acts">
+      <button onclick="show(${i-1})" ${i?"":"disabled"}>‹ 上一段</button>
+      <button onclick="show(${i+1})" ${i<CH.length-1?"":"disabled"}>下一段 ›</button>
+      ${VIDEO?`<a class="go" data-t="${a}" href="${jump(a)}" target="_blank" rel="noopener">▶ 從 ${T(a)} 播放</a>`:""}
+    </div>`;
+  segs.forEach((e,j)=>e.classList.toggle("on",j===i));
+  rows.forEach((e,j)=>e.classList.toggle("on",j===i));
+  if(scroll)det.scrollIntoView({block:"nearest",behavior:"smooth"});
+}
+CH.forEach(([a,b,t],i)=>{
+  const s=document.createElement("button");
+  s.className="seg";s.style.flex=(b-a)+" 1 0";s.title=`${T(a)} ${t}`;s.textContent=i+1;
+  s.setAttribute("aria-label",`第 ${i+1} 段：${t}`);
+  s.onclick=()=>show(i);bar.appendChild(s);segs.push(s);
+  const r=document.createElement("div");r.className="row";
+  r.innerHTML=`<button><span class="tm">${T(a)} – ${T(b)}</span><span>${t}</span></button>`+
+    (VIDEO?`<a class="go" data-t="${a}" href="${jump(a)}" target="_blank" rel="noopener" title="從 ${T(a)} 播放">▶</a>`:"");
+  r.querySelector("button").onclick=()=>show(i,true);list.appendChild(r);rows.push(r);
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowRight")show(cur+1);
+  if(e.key==="ArrowLeft")show(cur-1);
+});
+show(0);
+
+// 把每個 h2 與其後內容包成 section，產生固定導覽；沒有 data-quick 的區塊在速覽模式隱藏
+const nav=document.getElementById("navlinks");
+document.querySelectorAll(".wrap h2").forEach((h,i)=>{
+  const s=document.createElement("section");
+  s.id="s"+i;
+  const quick=h.hasAttribute("data-quick");
+  if(!quick)s.className="full";
+  h.before(s);
+  let n=h;
+  while(n&&!(n!==h&&n.tagName==="H2")){const nx=n.nextSibling;s.appendChild(n);n=nx;}
+  const l=document.createElement("a");
+  l.href="#s"+i;l.textContent=h.dataset.nav||h.textContent;
+  if(!quick)l.className="full";
+  nav.appendChild(l);
+});
+function setMode(q){
+  document.body.classList.toggle("quick",q);
+  document.getElementById("mQuick").classList.toggle("on",q);
+  document.getElementById("mFull").classList.toggle("on",!q);
+  try{localStorage.setItem("summaryMode",q?"quick":"full")}catch(e){}
+}
+let saved=null;try{saved=localStorage.getItem("summaryMode")}catch(e){}
+setMode(saved==="quick");
+
+// 內嵌播放器：點時間戳在頁內跳轉播放，播放中時間軸跟著亮。
+// 離線、影片禁止內嵌或播放器報錯時 ready=false，時間戳連結照常在新分頁開啟。
+let player=null,ready=false,lastAuto=-1;
+const vid=((VIDEO.match(/[?&]v=([\w-]{11})|youtu\.be\/([\w-]{11})/)||[]).slice(1).find(Boolean));
+const box=document.getElementById("player");
+function playerOff(msg){ready=false;box.classList.add("off");box.innerHTML=`<p>${msg}</p>`}
+if(vid){
+  window.onYouTubeIframeAPIReady=()=>{
+    player=new YT.Player("yt",{videoId:vid,playerVars:{rel:0,playsinline:1},events:{
+      onReady:()=>{ready=true},
+      onError:e=>playerOff(`這支影片無法在此頁內嵌播放（YouTube 錯誤 ${e.data}），點時間戳會改在新分頁開啟。`)
+    }});
+  };
+  const s=document.createElement("script");
+  s.src="https://www.youtube.com/iframe_api";
+  s.onerror=()=>playerOff("目前無法連線到 YouTube，點時間戳會在新分頁開啟。");
+  document.head.appendChild(s);
+  // 直接雙擊開啟（file://）時 YouTube 拿不到來源網址，播放器常卡黑畫面且不觸發 onError
+  setTimeout(()=>{if(!ready&&!box.classList.contains("off"))playerOff(
+    location.protocol==="file:"
+      ?"直接開啟本機檔案時 YouTube 不允許內嵌播放；請改開網路版網址，或點時間戳在新分頁開啟。"
+      :"影片播放器載入失敗，點時間戳會在新分頁開啟。")},8000);
+  setInterval(()=>{
+    if(!ready||player.getPlayerState()!==YT.PlayerState.PLAYING)return;
+    const t=player.getCurrentTime(),i=CH.findIndex(([a,b])=>t>=a&&t<b);
+    if(i>=0&&i!==lastAuto){lastAuto=i;show(i)}
+  },1000);
+}else box.remove();
+document.addEventListener("click",e=>{
+  const a=e.target.closest("a.go[data-t]");
+  if(!a||!ready)return;
+  e.preventDefault();
+  lastAuto=CH.findIndex(([s])=>s===+a.dataset.t);
+  show(lastAuto);
+  player.seekTo(+a.dataset.t,true);player.playVideo();
+  box.scrollIntoView({block:"nearest",behavior:"smooth"});
+});
+</script>
+</body>
+</html>
